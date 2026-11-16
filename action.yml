@@ -1,0 +1,22 @@
+name: Defrag your contributions
+description: Your GitHub contribution graph as a retro disk defragmenter. Writes an animated SVG for your profile README.
+author: maximbilan
+branding:
+  icon: hard-drive
+  color: blue
+inputs:
+  github_user_name:
+    description: Whose contributions to defragment.
+    required: false
+    default: ${{ github.repository_owner }}
+  output_path:
+    description: Where to write the SVG.
+    required: false
+    default: dist/defrag.svg
+  github_token:
+    description: Token for the GitHub GraphQL API. The default workflow token is enough.
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: node20
+  main: src/index.js

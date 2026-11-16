@@ -1,0 +1,27 @@
+# Keeps the preview in this repo's README fresh: runs the action from this repo
+# for its owner and pushes the SVG to the output branch.
+name: demo
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  defrag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          github_user_name: ${{ github.repository_owner }}
+          output_path: dist/defrag.svg
+      - name: Push to the output branch
+        run: |
+          cd dist
+          git init -q -b output
+          git add defrag.svg
+          git -c user.name=defrag -c user.email=defrag@users.noreply.github.com commit -q -m "defrag $(date -u +%F)"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" output
