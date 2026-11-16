@@ -20,7 +20,7 @@ It's a single animated SVG, redrawn every day by a GitHub Action. No server, no 
 
 ## Run it locally
 
-Node 20 or later, nothing to install:
+Node 20 or later, nothing to install (the Action itself runs on Node 24):
 
 ```sh
 GITHUB_TOKEN=$(gh auth token) node src/index.js --user <you> --out defrag.svg
