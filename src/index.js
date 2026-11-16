@@ -166,6 +166,24 @@ function render(cal, user, freeze) {
   // state at time t, for --freeze
   const at = (s, t) => s.reduce((cur, e) => (e.t <= t ? e : cur), s[0]);
 
+  // Keyframes that hold each state and switch instantly, the way snk (the snake) does it:
+  // linear timing with two stops per change, the old value just before and the new one at
+  // the change. step-end over hundreds of animations drifted by seconds in real Chrome.
+  // states: [{t, d}] in time order, d a CSS declaration block, states[0].t = 0.
+  const keyframes = (states) => {
+    let out = `0%{${states[0].d}}`, prev = 0;
+    for (let k = 1; k < states.length; k++) {
+      const p = (100 * states[k].t) / L;
+      if (p >= 100) break;
+      const before = Math.max(prev, p - 0.002);
+      out += `${before.toFixed(4)}%{${states[k - 1].d}}${p.toFixed(4)}%{${states[k].d}}`;
+      prev = p;
+    }
+    let last = states[0];
+    for (const e of states) if ((100 * e.t) / L < 100) last = e;
+    return out + `100%{${last.d}}`;
+  };
+
   let css = "", cells = "";
   days.forEach((d, i) => {
     const p = pos[i], x = mapX + p.col * PITCH, y = mapY + 8 + p.row * PITCH, s = sched[i];
@@ -178,8 +196,8 @@ function render(cal, user, freeze) {
       cells += r(x, y, CELL, CELL, s[0].fill, ` stroke="${s[0].stroke}" stroke-width="1"`);
       return;
     }
-    const frames = s.map((e) => `${pct(e.t)}%{fill:${e.fill};stroke:${e.stroke}}`).join("");
-    css += `@keyframes c${i}{${frames}100%{fill:${s[s.length - 1].fill};stroke:${s[s.length - 1].stroke}}}.c${i}{animation:c${i} ${L.toFixed(2)}s step-end infinite}`;
+    const frames = keyframes(s.map((e) => ({ t: e.t, d: `fill:${e.fill};stroke:${e.stroke}` })));
+    css += `@keyframes c${i}{${frames}}.c${i}{animation:c${i} ${L.toFixed(3)}s linear infinite}`;
     cells += r(x, y, CELL, CELL, s[0].fill, ` class="c${i}" stroke="${s[0].stroke}" stroke-width="1"`);
   });
 
@@ -189,9 +207,10 @@ function render(cal, user, freeze) {
     const id = "s" + showN++;
     if (freeze !== undefined) return freeze >= t0 && freeze < t1 ? body : "";
     // visibility, not opacity: it animates on the main thread everywhere (opacity can be
-    // handed to the compositor), and keyframes past 100% are dropped, so clamp them
-    const hide = t1 < L ? `${pct(t1)}%{visibility:hidden}` : "";
-    css += `@keyframes ${id}{0%{visibility:hidden}${pct(t0)}%{visibility:visible}${hide}}.${id}{visibility:hidden;animation:${id} ${L.toFixed(2)}s step-end infinite}`;
+    // handed to the compositor)
+    const st = t0 <= 0 ? [{ t: 0, d: "visibility:visible" }] : [{ t: 0, d: "visibility:hidden" }, { t: t0, d: "visibility:visible" }];
+    if (t1 < L) st.push({ t: t1, d: "visibility:hidden" });
+    css += `@keyframes ${id}{${keyframes(st)}}.${id}{visibility:hidden;animation:${id} ${L.toFixed(3)}s linear infinite}`;
     return `<g class="${id}">${body}</g>`;
   };
 
