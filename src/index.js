@@ -30,6 +30,7 @@ function inputs() {
     token: arg("token") || env("github_token") || process.env.GITHUB_TOKEN,
     freeze: arg("freeze") !== undefined ? parseFloat(arg("freeze")) : undefined,
     data: arg("data"), // a saved calendar JSON, for offline work
+    theme: arg("theme") || env("theme") || "classic",
   };
 }
 
@@ -65,7 +66,7 @@ const LEVEL = { NONE: 0, FIRST_QUARTILE: 1, SECOND_QUARTILE: 2, THIRD_QUARTILE: 
 // ---------- the look ----------
 const C = {
   face: "#c0c0c0", light: "#ffffff", hilite: "#dfdfdf", shadow: "#808080", dark: "#000000",
-  title0: "#000080", title1: "#1084d0", text: "#000000",
+  title0: "#000080", title1: "#1084d0", text: "#000000", muted: "#404040",
   free: "#ffffff", freeEdge: "#c6c6c6",
   read: "#00b000", write: "#e00000",
   // not yet optimized (cyan) and optimized (blue), by contribution level 1..4
@@ -73,6 +74,19 @@ const C = {
   opt: ["", "#a9bdfc", "#5f80ee", "#2c48c6", "#0d2185"],
   edgeUnopt: "#2a8fa3", edgeOpt: "#0a1660",
 };
+// The dark theme, for profiles viewed in GitHub's dark mode: the same window, at night.
+const DARK = {
+  ...C,
+  face: "#2d2d30", light: "#5a5a5e", hilite: "#3f3f44", shadow: "#1b1b1d", dark: "#0a0a0a",
+  title0: "#2b3f9a", title1: "#3b6fb6", text: "#e8e8e8", muted: "#a0a0a0",
+  free: "#0d1117", freeEdge: "#30363d",
+  unopt: ["", "#0f4c5a", "#127487", "#1aa3bd"],
+  opt: ["", "#26386e", "#3552a8", "#5277e0"],
+  edgeUnopt: "#36c3dc", edgeOpt: "#8aa6ff",
+};
+const THEMES = { classic: C, dark: DARK };
+// The palette the drawing helpers use. render() sets it from the theme.
+let P = C;
 const FONT = "Tahoma, 'MS Sans Serif', Verdana, Geneva, sans-serif";
 const W = 880; // viewBox width
 const CELL = 13, GAP = 3, PITCH = CELL + GAP;
@@ -90,19 +104,19 @@ function defrag(days) {
   const U = used.length;
   const dt = U ? Math.min(0.045, SWEEP_MAX / U) : 0;
   const sched = days.map((d) =>
-    [{ t: 0, fill: d.level ? C.unopt[d.level] : C.free, stroke: d.level ? C.edgeUnopt : C.freeEdge }]);
+    [{ t: 0, fill: d.level ? P.unopt[d.level] : P.free, stroke: d.level ? P.edgeUnopt : P.freeEdge }]);
   const head = []; // where the read/write head is at each step, for the progress bar
   used.forEach((src, rank) => {
     const t = T_START + rank * dt, lv = days[src].level;
     if (src === rank) {
       // already in place: a quick read, then optimized
-      sched[src].push({ t, fill: C.read, stroke: C.read });
-      sched[src].push({ t: t + dt * 0.8, fill: C.opt[lv], stroke: C.edgeOpt });
+      sched[src].push({ t, fill: P.read, stroke: P.read });
+      sched[src].push({ t: t + dt * 0.8, fill: P.opt[lv], stroke: P.edgeOpt });
     } else {
-      sched[src].push({ t, fill: C.read, stroke: C.read });                        // read
-      sched[src].push({ t: t + dt * 0.5, fill: C.free, stroke: C.freeEdge });      // now free
-      sched[rank].push({ t: t + dt * 0.5, fill: C.write, stroke: C.write });       // write
-      sched[rank].push({ t: t + dt * 1.3, fill: C.opt[lv], stroke: C.edgeOpt });   // optimized
+      sched[src].push({ t, fill: P.read, stroke: P.read });                        // read
+      sched[src].push({ t: t + dt * 0.5, fill: P.free, stroke: P.freeEdge });      // now free
+      sched[rank].push({ t: t + dt * 0.5, fill: P.write, stroke: P.write });       // write
+      sched[rank].push({ t: t + dt * 1.3, fill: P.opt[lv], stroke: P.edgeOpt });   // optimized
     }
     head.push(t);
   });
@@ -115,15 +129,16 @@ function defrag(days) {
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const r = (x, y, w, h, fill, extra = "") => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"${extra}/>`;
 // A raised (button, window) or sunken (panel) Windows 98 bevel.
-function bevel(x, y, w, h, sunken, face = C.face) {
-  const [o1, o2, i1, i2] = sunken ? [C.shadow, C.light, C.dark, C.hilite] : [C.light, C.dark, C.hilite, C.shadow];
+function bevel(x, y, w, h, sunken, face = P.face) {
+  const [o1, o2, i1, i2] = sunken ? [P.shadow, P.light, P.dark, P.hilite] : [P.light, P.dark, P.hilite, P.shadow];
   return [
     r(x, y, w, h, face),
     r(x, y, w, 1, o1), r(x, y, 1, h, o1), r(x, y + h - 1, w, 1, o2), r(x + w - 1, y, 1, h, o2),
     r(x + 1, y + 1, w - 2, 1, i1), r(x + 1, y + 1, 1, h - 2, i1), r(x + 1, y + h - 2, w - 2, 1, i2), r(x + w - 2, y + 1, 1, h - 2, i2),
   ].join("");
 }
-const text = (x, y, s, extra = "") => `<text x="${x}" y="${y}" font-family="${FONT}" font-size="11"${extra}>${esc(s)}</text>`;
+const text = (x, y, s, extra = "") =>
+  `<text x="${x}" y="${y}" font-family="${FONT}" font-size="11"${/ fill=/.test(extra) ? "" : ` fill="${P.text}"`}${extra}>${esc(s)}</text>`;
 function button(x, y, w, label, bold = false) {
   return bevel(x, y, w, 23, false) + text(x + w / 2, y + 15, label, ` text-anchor="middle"${bold ? ' font-weight="bold"' : ""}`);
 }
@@ -133,14 +148,14 @@ function caption(x, y) {
   [0, 1, 2].forEach((k) => {
     const bx = x + k * 16 + (k === 2 ? 2 : 0);
     s += bevel(bx, y, 16, 14, false);
-    if (k === 0) s += r(bx + 4, y + 9, 6, 2, C.dark);
-    if (k === 1) s += r(bx + 3, y + 2, 9, 9, "none", ` stroke="${C.dark}" stroke-width="1"`) + r(bx + 3, y + 2, 9, 2, C.dark);
-    if (k === 2) s += `<path d="M${bx + 4} ${y + 3}l7 7m0 -7l-7 7" stroke="${C.dark}" stroke-width="1.6"/>`;
+    if (k === 0) s += r(bx + 4, y + 9, 6, 2, P.text);
+    if (k === 1) s += r(bx + 3, y + 2, 9, 9, "none", ` stroke="${P.text}" stroke-width="1"`) + r(bx + 3, y + 2, 9, 2, P.text);
+    if (k === 2) s += `<path d="M${bx + 4} ${y + 3}l7 7m0 -7l-7 7" stroke="${P.text}" stroke-width="1.6"/>`;
   });
   return s;
 }
 function titleBar(x, y, w, label, id) {
-  return `<defs><linearGradient id="${id}" x1="0" x2="1"><stop offset="0" stop-color="${C.title0}"/><stop offset="1" stop-color="${C.title1}"/></linearGradient></defs>` +
+  return `<defs><linearGradient id="${id}" x1="0" x2="1"><stop offset="0" stop-color="${P.title0}"/><stop offset="1" stop-color="${P.title1}"/></linearGradient></defs>` +
     r(x, y, w, 18, `url(#${id})`) +
     // a little drive icon
     bevel(x + 3, y + 3, 14, 11, false, "#d8d8d8") + r(x + 12, y + 9, 2, 2, "#00c000") +
@@ -149,7 +164,13 @@ function titleBar(x, y, w, label, id) {
 }
 
 // ---------- the picture ----------
-function render(cal, user, freeze) {
+// Escapes a string for use in SVG text and attributes.
+function escapeXml(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function render(cal, user, freeze, theme = "classic") {
+  P = THEMES[theme] || C;
   const days = cal.weeks.flat();
   const { sched, end, U } = defrag(days);
   const free = days.length - U;
@@ -218,7 +239,7 @@ function render(cal, user, freeze) {
   const H = 300;
   let s = bevel(0, 0, W, H, false);
   s += titleBar(3, 3, W - 6, `Defragmenting github.com/${user}`, "tb");
-  s += bevel(8, mapY, W - 16, panelH, true, C.free);
+  s += bevel(8, mapY, W - 16, panelH, true, P.free);
   s += cells;
 
   // status, progress bar, percentage
@@ -231,7 +252,7 @@ function render(cal, user, freeze) {
   const chunks = Math.floor((barW - 6) / 10);
   for (let k = 0; k < chunks; k++) {
     const tk = T_START + ((k + 1) / chunks) * (end - T_START);
-    s += showBetween(tk, L + 1, r(barX + 3 + k * 10, barY + 3, 8, barH - 6, C.title0));
+    s += showBetween(tk, L + 1, r(barX + 3 + k * 10, barY + 3, 8, barH - 6, P.title0));
   }
   for (let p = 0; p <= 100; p++) {
     const t0 = p === 0 ? 0 : T_START + (p / 100) * (end - T_START), t1 = p === 100 ? L + 1 : T_START + ((p + 1) / 100) * (end - T_START);
@@ -242,14 +263,14 @@ function render(cal, user, freeze) {
   s += button(10, by, 75, "Stop") + button(93, by, 75, "Pause") + button(176, by, 75, "Legend") + button(259, by, 95, "Hide Details");
   // legend
   const ly = by + 42;
-  const legend = [[C.opt[3], C.edgeOpt, "Optimized: days you contributed"], [C.unopt[3], C.edgeUnopt, "Not optimized yet"],
-    [C.read, C.read, "Reading"], [C.write, C.write, "Writing"], [C.free, C.freeEdge, "Free space: days off"]];
+  const legend = [[P.opt[3], P.edgeOpt, "Optimized: days you contributed"], [P.unopt[3], P.edgeUnopt, "Not optimized yet"],
+    [P.read, P.read, "Reading"], [P.write, P.write, "Writing"], [P.free, P.freeEdge, "Free space: days off"]];
   let lx = 10;
   legend.forEach(([f, e, label]) => {
     s += r(lx, ly - 10, 11, 11, f, ` stroke="${e}" stroke-width="1"`) + text(lx + 17, ly, label);
     lx += 17 + label.length * 6.1 + 22;
   });
-  s += text(10, ly + 20, "Each box represents one day.", ` fill="#404040"`);
+  s += text(10, ly + 20, "Each box represents one day.", ` fill="${P.muted}"`);
 
   // the dialog at the end
   const dw = 380, dh = 128, dx = (W - dw) / 2, dy = 70;
@@ -257,8 +278,8 @@ function render(cal, user, freeze) {
   // logged-out visitor and the Action's token each see a different number), the days don't.
   let dlg = bevel(dx, dy, dw, dh, false) + titleBar(dx + 3, dy + 3, dw - 6, "Defrag", "tb2");
   // an "i" icon
-  dlg += `<circle cx="${dx + 30}" cy="${dy + 50}" r="14" fill="#ffffff" stroke="${C.title0}" stroke-width="2"/>` +
-    `<text x="${dx + 30}" y="${dy + 56}" text-anchor="middle" font-family="Georgia, serif" font-weight="bold" font-size="17" fill="${C.title0}">i</text>`;
+  dlg += `<circle cx="${dx + 30}" cy="${dy + 50}" r="14" fill="#ffffff" stroke="${P.title0}" stroke-width="2"/>` +
+    `<text x="${dx + 30}" y="${dy + 56}" text-anchor="middle" font-family="Georgia, serif" font-weight="bold" font-size="17" fill="${P.title0}">i</text>`;
   dlg += text(dx + 56, dy + 42, `Defragmentation of github.com/${user} is complete.`);
   dlg += text(dx + 56, dy + 59, `${U} days of contributions. ${free} days of free space.`);
   dlg += text(dx + 56, dy + 80, "Take a day off?", ` font-weight="bold"`);
@@ -266,6 +287,7 @@ function render(cal, user, freeze) {
   s += showBetween(end + 0.7, L + 1, dlg);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(user)}'s GitHub contributions, defragmented: ${U} days of contributions, ${free} days of free space">` +
+    `<title>${escapeXml(`Defragmenting github.com/${user}`)}</title>` +
     (css ? `<style>${css}</style>` : "") + s + `</svg>\n`;
 }
 
@@ -280,7 +302,7 @@ function render(cal, user, freeze) {
       if (!o.token) throw new Error("no token: set GITHUB_TOKEN or the github_token input");
       cal = await calendar(o.user, o.token);
     }
-    const svg = render(cal, o.user, o.freeze);
+    const svg = render(cal, o.user, o.freeze, o.theme);
     fs.mkdirSync(path.dirname(path.resolve(o.out)), { recursive: true });
     fs.writeFileSync(o.out, svg);
     const days = cal.weeks.flat();

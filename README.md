@@ -25,6 +25,7 @@ Node 20 or later, nothing to install (the Action itself runs on Node 24):
 ```sh
 GITHUB_TOKEN=$(gh auth token) node src/index.js --user <you> --out defrag.svg
 node src/index.js --user <you> --out still.svg --freeze 5    # one static frame at 5 s
+node src/index.js --user <you> --out dark.svg --theme dark    # the dark theme
 ```
 
 ## How it works
@@ -40,6 +41,7 @@ node src/index.js --user <you> --out still.svg --freeze 5    # one static frame 
 | `github_user_name` | the repo owner | Whose contributions to defragment. |
 | `output_path` | `dist/defrag.svg` | Where to write the SVG. |
 | `github_token` | the workflow token | For the GraphQL API. |
+| `theme` | `classic` | `dark` draws the same window at night, for GitHub's dark mode. |
 
 ---
 

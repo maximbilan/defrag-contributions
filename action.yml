@@ -13,6 +13,10 @@ inputs:
     description: Where to write the SVG.
     required: false
     default: dist/defrag.svg
+  theme:
+    description: "classic, or dark to match GitHub's dark mode."
+    required: false
+    default: classic
   github_token:
     description: Token for the GitHub GraphQL API. The default workflow token is enough.
     required: false
