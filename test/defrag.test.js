@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { defrag, render, C, DARK } = require("../src/index.js");
+const { defrag, render, fetchWithRetry, C, DARK, LEVEL } = require("../src/index.js");
 
 const day = (level, i = 0) => ({ date: `2026-01-${String(i + 1).padStart(2, "0")}`, weekday: i % 7, count: level * 2, level });
 const year = (levels) => {
@@ -27,11 +27,57 @@ test("the dialog reports the days of contributions and of free space", () => {
 });
 
 test("the dark palette has a color for every contribution level", () => {
-  assert.equal(DARK.unopt.length, 4);
-  assert.equal(DARK.opt.length, 4);
+  const levels = Object.keys(LEVEL).length; // NONE, then levels 1..4
+  assert.equal(DARK.unopt.length, levels);
+  assert.equal(DARK.opt.length, levels);
 });
 
 test("renders the dark theme", () => {
   const svg = render(year([0, 1, 2, 0, 3, 4, 0]), "octocat", 3, "dark");
   assert.match(svg, /#0d1117/);
+  assert.doesNotMatch(svg, /undefined/);
 });
+
+test("defrag doesn't depend on the theme of the last render", () => {
+  render(year([0, 1, 2, 0, 3, 4, 0]), "octocat", 3, "dark");
+  const { sched } = defrag([day(4, 0)]);
+  assert.equal(sched[0][sched[0].length - 1].fill, C.opt[4]);
+});
+
+test("an unknown theme falls back to the classic one", () => {
+  const svg = render(year([0, 1, 2, 0, 3, 4, 0]), "octocat", 3, "constructor");
+  assert.match(svg, new RegExp(C.face));
+  assert.doesNotMatch(svg, /undefined/);
+});
+
+// fetchWithRetry against a fake fetch that answers with the given statuses in turn.
+const withFetch = async (statuses, fn) => {
+  const real = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => new Response("body", { status: statuses[Math.min(calls++, statuses.length - 1)] });
+  try {
+    return await fn(() => calls);
+  } finally {
+    globalThis.fetch = real;
+  }
+};
+
+test("retries a 502 until GitHub answers", () =>
+  withFetch([502, 503, 200], async (calls) => {
+    const res = await fetchWithRetry("https://example.invalid", {}, { delay: 0 });
+    assert.equal(res.status, 200);
+    assert.equal(calls(), 3);
+  }));
+
+test("gives up after the retries with a transient error", () =>
+  withFetch([502], async (calls) => {
+    await assert.rejects(fetchWithRetry("https://example.invalid", {}, { delay: 0 }), (e) => e.transient === true);
+    assert.equal(calls(), 4);
+  }));
+
+test("doesn't retry a bad token", () =>
+  withFetch([401], async (calls) => {
+    const res = await fetchWithRetry("https://example.invalid", {}, { delay: 0 });
+    assert.equal(res.status, 401);
+    assert.equal(calls(), 1);
+  }));

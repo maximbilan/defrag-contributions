@@ -30,13 +30,35 @@ function inputs() {
     token: arg("token") || env("github_token") || process.env.GITHUB_TOKEN,
     freeze: arg("freeze") !== undefined ? parseFloat(arg("freeze")) : undefined,
     data: arg("data"), // a saved calendar JSON, for offline work
-    theme: arg("theme") || env("theme") || "classic",
+    theme: (arg("theme") || env("theme") || "classic").trim().toLowerCase(),
   };
 }
 
 // ---------- the contribution calendar ----------
+// The GraphQL API returns a 502 now and then, which used to fail the whole nightly run.
+// Retry those, and network errors, with exponential backoff: 1 s, 2 s, 4 s. If GitHub is
+// still down after that, the error is marked transient, so main() can tell it apart from
+// a bad token or user name.
+const RETRY_ON = [502, 503, 504];
+async function fetchWithRetry(url, init, { retries = 3, delay = 1000 } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    let res, err;
+    try {
+      res = await fetch(url, init);
+    } catch (e) {
+      err = e;
+    }
+    if (res && !RETRY_ON.includes(res.status)) return res;
+    if (attempt >= retries) {
+      const e = new Error(err ? `GitHub API: ${err.message}` : `GitHub API: ${res.status} ${await res.text()}`);
+      e.transient = true;
+      throw e;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delay * 2 ** attempt));
+  }
+}
+
 async function calendar(user, token) {
-  const { withRetry } = require("@octokit/graphql-retry");
   const query = `query($login: String!) {
     user(login: $login) {
       contributionsCollection {
@@ -47,16 +69,11 @@ async function calendar(user, token) {
       }
     }
   }`;
-  // The GraphQL API returns a 502 now and then, which used to fail the whole nightly run.
-  // Retry those with exponential backoff.
-  const res = await withRetry(
-    () => fetch("https://api.github.com/graphql", {
-      method: "POST",
-      headers: { Authorization: `bearer ${token}`, "Content-Type": "application/json", "User-Agent": "defrag-contributions" },
-      body: JSON.stringify({ query, variables: { login: user } }),
-    }),
-    { retries: 3, factor: 2, retryOn: [502, 503, 504] },
-  );
+  const res = await fetchWithRetry("https://api.github.com/graphql", {
+    method: "POST",
+    headers: { Authorization: `bearer ${token}`, "Content-Type": "application/json", "User-Agent": "defrag-contributions" },
+    body: JSON.stringify({ query, variables: { login: user } }),
+  });
   if (!res.ok) throw new Error(`GitHub API: ${res.status} ${await res.text()}`);
   const json = await res.json();
   if (json.errors) throw new Error("GitHub API: " + json.errors.map((e) => e.message).join("; "));
@@ -86,8 +103,8 @@ const DARK = {
   face: "#2d2d30", light: "#5a5a5e", hilite: "#3f3f44", shadow: "#1b1b1d", dark: "#0a0a0a",
   title0: "#2b3f9a", title1: "#3b6fb6", text: "#e8e8e8", muted: "#a0a0a0",
   free: "#0d1117", freeEdge: "#30363d",
-  unopt: ["", "#0f4c5a", "#127487", "#1aa3bd"],
-  opt: ["", "#26386e", "#3552a8", "#5277e0"],
+  unopt: ["", "#0f4c5a", "#127487", "#1aa3bd", "#4dd3ea"],
+  opt: ["", "#26386e", "#3552a8", "#5277e0", "#7b98f2"],
   edgeUnopt: "#36c3dc", edgeOpt: "#8aa6ff",
 };
 const THEMES = { classic: C, dark: DARK };
@@ -105,24 +122,25 @@ const HOLD = 4.5;      // the finished map and the dialog
 // ---------- the defragmenter ----------
 // days: in date order. Each used day (level > 0) moves to the front, keeping its order.
 // Returns per-cell color schedules: [{t, fill, stroke}] in time order, starting at t = 0.
-function defrag(days) {
+// pal: the palette, passed in so the result doesn't depend on the last render().
+function defrag(days, pal = C) {
   const used = days.map((d, i) => (d.level > 0 ? i : -1)).filter((i) => i >= 0);
   const U = used.length;
   const dt = U ? Math.min(0.045, SWEEP_MAX / U) : 0;
   const sched = days.map((d) =>
-    [{ t: 0, fill: d.level ? P.unopt[d.level] : P.free, stroke: d.level ? P.edgeUnopt : P.freeEdge }]);
+    [{ t: 0, fill: d.level ? pal.unopt[d.level] : pal.free, stroke: d.level ? pal.edgeUnopt : pal.freeEdge }]);
   const head = []; // where the read/write head is at each step, for the progress bar
   used.forEach((src, rank) => {
     const t = T_START + rank * dt, lv = days[src].level;
     if (src === rank) {
       // already in place: a quick read, then optimized
-      sched[src].push({ t, fill: P.read, stroke: P.read });
-      sched[src].push({ t: t + dt * 0.8, fill: P.opt[lv], stroke: P.edgeOpt });
+      sched[src].push({ t, fill: pal.read, stroke: pal.read });
+      sched[src].push({ t: t + dt * 0.8, fill: pal.opt[lv], stroke: pal.edgeOpt });
     } else {
-      sched[src].push({ t, fill: P.read, stroke: P.read });                        // read
-      sched[src].push({ t: t + dt * 0.5, fill: P.free, stroke: P.freeEdge });      // now free
-      sched[rank].push({ t: t + dt * 0.5, fill: P.write, stroke: P.write });       // write
-      sched[rank].push({ t: t + dt * 1.3, fill: P.opt[lv], stroke: P.edgeOpt });   // optimized
+      sched[src].push({ t, fill: pal.read, stroke: pal.read });                        // read
+      sched[src].push({ t: t + dt * 0.5, fill: pal.free, stroke: pal.freeEdge });      // now free
+      sched[rank].push({ t: t + dt * 0.5, fill: pal.write, stroke: pal.write });       // write
+      sched[rank].push({ t: t + dt * 1.3, fill: pal.opt[lv], stroke: pal.edgeOpt });   // optimized
     }
     head.push(t);
   });
@@ -170,15 +188,10 @@ function titleBar(x, y, w, label, id) {
 }
 
 // ---------- the picture ----------
-// Escapes a string for use in SVG text and attributes.
-function escapeXml(value) {
-  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 function render(cal, user, freeze, theme = "classic") {
-  P = THEMES[theme] || C;
+  P = Object.hasOwn(THEMES, theme) ? THEMES[theme] : C;
   const days = cal.weeks.flat();
-  const { sched, end, U } = defrag(days);
+  const { sched, end, U } = defrag(days, P);
   const free = days.length - U;
   const L = end + HOLD; // loop length
   const pct = (t) => ((100 * t) / L).toFixed(3);
@@ -293,7 +306,7 @@ function render(cal, user, freeze, theme = "classic") {
   s += showBetween(end + 0.7, L + 1, dlg);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(user)}'s GitHub contributions, defragmented: ${U} days of contributions, ${free} days of free space">` +
-    `<title>${escapeXml(`Defragmenting github.com/${user}`)}</title>` +
+    `<title>${esc(`Defragmenting github.com/${user}`)}</title>` +
     (css ? `<style>${css}</style>` : "") + s + `</svg>\n`;
 }
 
@@ -302,15 +315,19 @@ async function main() {
   try {
     const o = inputs();
     if (!o.user) throw new Error("no user: pass --user or the github_user_name input");
+    if (!Object.hasOwn(THEMES, o.theme)) throw new Error(`unknown theme "${o.theme}": use ${Object.keys(THEMES).join(" or ")}`);
     let cal;
     if (o.data) cal = JSON.parse(fs.readFileSync(o.data, "utf8"));
     else {
       if (!o.token) throw new Error("no token: set GITHUB_TOKEN or the github_token input");
       try {
         cal = await calendar(o.user, o.token);
-      } catch {
-        // If GitHub is still down after the retries, draw an empty disk instead of failing
-        // the run: tomorrow's run will catch up.
+      } catch (e) {
+        // A bad token, a wrong user name or any other error fails the run as before.
+        if (!e.transient) throw e;
+        // GitHub is still down after the retries: draw an empty disk instead of failing
+        // the run. Tomorrow's run will catch up.
+        console.warn(`defrag-contributions: ${e.message}; drawing an empty disk`);
         cal = { total: 0, weeks: [] };
       }
     }
@@ -327,4 +344,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { defrag, render, C, DARK, LEVEL };
+module.exports = { defrag, render, fetchWithRetry, C, DARK, LEVEL };
