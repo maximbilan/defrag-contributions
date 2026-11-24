@@ -1,0 +1,11 @@
+{
+  "name": "defrag-contributions",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Your GitHub contribution graph as a retro disk defragmenter.",
+  "main": "src/index.js",
+  "license": "MIT",
+  "dependencies": {
+    "@octokit/graphql-retry": "^2.1.0"
+  }
+}

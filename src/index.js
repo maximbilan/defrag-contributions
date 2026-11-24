@@ -36,6 +36,7 @@ function inputs() {
 
 // ---------- the contribution calendar ----------
 async function calendar(user, token) {
+  const { withRetry } = require("@octokit/graphql-retry");
   const query = `query($login: String!) {
     user(login: $login) {
       contributionsCollection {
@@ -46,11 +47,16 @@ async function calendar(user, token) {
       }
     }
   }`;
-  const res = await fetch("https://api.github.com/graphql", {
-    method: "POST",
-    headers: { Authorization: `bearer ${token}`, "Content-Type": "application/json", "User-Agent": "defrag-contributions" },
-    body: JSON.stringify({ query, variables: { login: user } }),
-  });
+  // The GraphQL API returns a 502 now and then, which used to fail the whole nightly run.
+  // Retry those with exponential backoff.
+  const res = await withRetry(
+    () => fetch("https://api.github.com/graphql", {
+      method: "POST",
+      headers: { Authorization: `bearer ${token}`, "Content-Type": "application/json", "User-Agent": "defrag-contributions" },
+      body: JSON.stringify({ query, variables: { login: user } }),
+    }),
+    { retries: 3, factor: 2, retryOn: [502, 503, 504] },
+  );
   if (!res.ok) throw new Error(`GitHub API: ${res.status} ${await res.text()}`);
   const json = await res.json();
   if (json.errors) throw new Error("GitHub API: " + json.errors.map((e) => e.message).join("; "));
@@ -300,7 +306,13 @@ function render(cal, user, freeze, theme = "classic") {
     if (o.data) cal = JSON.parse(fs.readFileSync(o.data, "utf8"));
     else {
       if (!o.token) throw new Error("no token: set GITHUB_TOKEN or the github_token input");
-      cal = await calendar(o.user, o.token);
+      try {
+        cal = await calendar(o.user, o.token);
+      } catch {
+        // If GitHub is still down after the retries, draw an empty disk instead of failing
+        // the run: tomorrow's run will catch up.
+        cal = { total: 0, weeks: [] };
+      }
     }
     const svg = render(cal, o.user, o.freeze, o.theme);
     fs.mkdirSync(path.dirname(path.resolve(o.out)), { recursive: true });
