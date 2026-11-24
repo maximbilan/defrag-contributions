@@ -5,6 +5,9 @@
   "description": "Your GitHub contribution graph as a retro disk defragmenter.",
   "main": "src/index.js",
   "license": "MIT",
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "@octokit/graphql-retry": "^2.1.0"
   }

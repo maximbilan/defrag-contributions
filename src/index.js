@@ -298,7 +298,7 @@ function render(cal, user, freeze, theme = "classic") {
 }
 
 // ---------- main ----------
-(async () => {
+async function main() {
   try {
     const o = inputs();
     if (!o.user) throw new Error("no user: pass --user or the github_user_name input");
@@ -323,4 +323,8 @@ function render(cal, user, freeze, theme = "classic") {
     console.error("defrag-contributions: " + e.message);
     process.exit(1);
   }
-})();
+}
+
+if (require.main === module) main();
+
+module.exports = { defrag, render, C, DARK, LEVEL };
