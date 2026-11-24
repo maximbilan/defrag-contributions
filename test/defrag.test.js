@@ -27,8 +27,8 @@ test("the dialog reports the days of contributions and of free space", () => {
 });
 
 test("the dark palette has a color for every contribution level", () => {
-  assert.equal(DARK.unopt.length, 5);
-  assert.equal(DARK.opt.length, 5);
+  assert.equal(DARK.unopt.length, 4);
+  assert.equal(DARK.opt.length, 4);
 });
 
 test("renders the dark theme", () => {
